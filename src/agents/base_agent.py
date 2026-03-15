@@ -8,7 +8,7 @@ and outputs a score distribution over the candidate pool plus a scalar bid.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import numpy as np
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 
 @dataclass
@@ -40,7 +40,7 @@ class ScoringAgent(ABC):
         self,
         query: str,
         candidates: List[Dict[str, Any]],
-        user_context: Dict[str, Any] | None = None,
+        user_context: Optional[Dict[str, Any]] = None,
     ) -> np.ndarray:
         """
         Compute raw scores for each candidate item.
@@ -59,7 +59,7 @@ class ScoringAgent(ABC):
         self,
         query: str,
         candidates: List[Dict[str, Any]],
-        user_context: Dict[str, Any] | None = None,
+        user_context: Optional[Dict[str, Any]] = None,
     ) -> float:
         """
         Return the bid for this query. Default: fixed bid.
@@ -71,7 +71,7 @@ class ScoringAgent(ABC):
         self,
         query: str,
         candidates: List[Dict[str, Any]],
-        user_context: Dict[str, Any] | None = None,
+        user_context: Optional[Dict[str, Any]] = None,
     ) -> AgentOutput:
         """Run scoring and return AgentOutput with softmax-normalized distribution."""
         raw_scores = self.score(query, candidates, user_context)

@@ -6,7 +6,7 @@ Pure numpy, no extra dependencies.
 """
 
 import numpy as np
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from collections import Counter
 
 from src.agents.base_agent import ScoringAgent
@@ -53,7 +53,7 @@ class PersonalizationAgent(ScoringAgent):
         self,
         query: str,
         candidates: List[Dict[str, Any]],
-        user_context: Dict[str, Any] | None = None,
+        user_context: Optional[Dict[str, Any]] = None,
     ) -> np.ndarray:
         history = (user_context or {}).get("history", [])
 

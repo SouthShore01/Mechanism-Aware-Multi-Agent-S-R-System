@@ -6,7 +6,7 @@ Requires: pip install rank-bm25
 """
 
 import numpy as np
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from src.agents.base_agent import ScoringAgent
 
@@ -32,7 +32,7 @@ class RelevanceAgent(ScoringAgent):
         self,
         query: str,
         candidates: List[Dict[str, Any]],
-        user_context: Dict[str, Any] | None = None,
+        user_context: Optional[Dict[str, Any]] = None,
     ) -> np.ndarray:
         from rank_bm25 import BM25Okapi
 

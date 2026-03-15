@@ -11,7 +11,7 @@ from unsafe items.
 """
 
 import numpy as np
-from typing import List, Dict, Any, Set
+from typing import List, Dict, Any, Set, Optional
 
 from src.agents.base_agent import ScoringAgent
 
@@ -32,8 +32,8 @@ class SafetyAgent(ScoringAgent):
 
     def __init__(
         self,
-        unsafe_categories: Set[str] | None = None,
-        unsafe_tags: Set[str] | None = None,
+        unsafe_categories: Optional[Set[str]] = None,
+        unsafe_tags: Optional[Set[str]] = None,
         bid: float = 0.1,
         safe_score: float = 1.0,
         unsafe_score: float = 1e-6,
@@ -57,7 +57,7 @@ class SafetyAgent(ScoringAgent):
         self,
         query: str,
         candidates: List[Dict[str, Any]],
-        user_context: Dict[str, Any] | None = None,
+        user_context: Optional[Dict[str, Any]] = None,
     ) -> np.ndarray:
         scores = np.array([
             self.unsafe_score if self._is_unsafe(c) else self.safe_score

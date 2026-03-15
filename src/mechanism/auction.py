@@ -7,7 +7,7 @@ payments, and returns a ranked slate with a full audit trace.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Literal
+from typing import List, Dict, Any, Literal, Optional
 import numpy as np
 
 from src.agents.base_agent import ScoringAgent, AgentOutput
@@ -59,7 +59,7 @@ class SlateAuction:
         self,
         query: str,
         candidates: List[Dict[str, Any]],
-        user_context: Dict[str, Any] | None = None,
+        user_context: Optional[Dict[str, Any]] = None,
         top_k: int = 10,
     ) -> AuctionResult:
         """

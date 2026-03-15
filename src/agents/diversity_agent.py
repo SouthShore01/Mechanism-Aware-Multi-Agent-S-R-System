@@ -7,7 +7,7 @@ Pure numpy, no extra dependencies.
 """
 
 import numpy as np
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from src.agents.base_agent import ScoringAgent
 
@@ -41,7 +41,7 @@ class DiversityAgent(ScoringAgent):
         self,
         query: str,
         candidates: List[Dict[str, Any]],
-        user_context: Dict[str, Any] | None = None,
+        user_context: Optional[Dict[str, Any]] = None,
     ) -> np.ndarray:
         if len(candidates) == 0:
             return np.array([])
