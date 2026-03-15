@@ -97,20 +97,15 @@ def get_influence_shares(
     aggregated: np.ndarray,
 ) -> dict:
     """
-    Compute each agent's actual influence share in the aggregated distribution.
+    Compute each agent's influence share in the aggregated distribution.
 
-    Influence share = 1 - KL(aggregated || p_i_removed)
-    Approximated here as the cosine similarity between agent distribution and
-    the final aggregated distribution (normalized dot product).
+    For linear aggregation: influence share = λᵢ = bᵢ / Σbⱼ
+    This is the exact theoretical quantity from Duetting et al. (2024):
+    the weight of agent i's distribution in the final mixture.
 
-    Used in audit logging and monotonicity verification (Experiment 3).
+    Used in audit logging (Experiment 5) and monotonicity verification
+    (Experiment 3): monotone ↔ increasing bᵢ → non-decreasing λᵢ.
     """
-    shares = {}
-    agg_norm = aggregated / (aggregated.sum() + 1e-10)
-
-    for ao in agent_outputs:
-        p_norm = ao.scores / (ao.scores.sum() + 1e-10)
-        # Dot product as proxy for alignment between agent and final distribution
-        shares[ao.agent_name] = float(np.dot(p_norm, agg_norm))
-
-    return shares
+    bids = [ao.bid for ao in agent_outputs]
+    lambdas = normalize_bids(bids)
+    return {ao.agent_name: float(lam) for ao, lam in zip(agent_outputs, lambdas)}
