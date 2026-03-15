@@ -1,0 +1,34 @@
+# Default configuration for the Mechanism-Aware Multi-Agent S&R System
+
+data:
+  dataset: kuaisar_small          # kuaisar_small | kuaisar
+  data_dir: data/raw/
+  max_candidates: 200             # candidate pool size per query
+
+agents:
+  relevance:
+    default_bid: 0.4
+    model: bm25                   # bm25 | dense | llm
+  personalization:
+    default_bid: 0.3
+    model: sasrec                 # recbole model name
+  diversity:
+    default_bid: 0.2
+    model: mmr                    # mmr | category_spread
+  safety:
+    default_bid: 0.1
+    model: rule_based             # rule_based | classifier
+
+mechanism:
+  aggregation_rule: linear        # linear | loglinear
+  compute_payment: true
+  top_k: 10                       # final slate size
+
+evaluation:
+  metrics: [ndcg@5, ndcg@10, recall@20, mrr, ild@10, coverage@10]
+  k_values: [5, 10, 20]
+
+experiment:
+  seed: 42
+  n_queries: 1000                 # number of test queries
+  log_dir: runs/
