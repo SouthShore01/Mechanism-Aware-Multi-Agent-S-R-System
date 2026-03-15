@@ -14,6 +14,7 @@ import numpy as np
 from typing import List, Dict
 from src.agents.base_agent import AgentOutput
 from src.mechanism.aggregation import linear_aggregation, get_influence_shares
+from dataclasses import replace
 
 
 def compute_critical_bid(
@@ -54,13 +55,7 @@ def compute_critical_bid(
         trial_outputs = []
         for i, ao in enumerate(agent_outputs):
             if i == target_agent_idx:
-                from src.agents.base_agent import AgentOutput
-                trial_outputs.append(AgentOutput(
-                    agent_name=ao.agent_name,
-                    scores=ao.scores,
-                    bid=mid,
-                    metadata=ao.metadata,
-                ))
+                trial_outputs.append(replace(ao, bid=mid))
             else:
                 trial_outputs.append(ao)
 

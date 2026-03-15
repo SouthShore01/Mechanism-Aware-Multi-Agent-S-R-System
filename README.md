@@ -369,8 +369,9 @@ pip install -r requirements.txt
 Download KuaiSAR-small:
 ```bash
 # From Zenodo (record 8181109)
-wget https://zenodo.org/record/8181109/files/KuaiSAR-small.zip
-unzip KuaiSAR-small.zip -d data/raw/
+# KuaiSAR-small = KuaiSAR.zip on Zenodo (10-day subset, 2023/5/22-5/31)
+wget https://zenodo.org/records/8181109/files/KuaiSAR.zip
+unzip KuaiSAR.zip -d data/raw/
 ```
 
 Run baseline experiment:

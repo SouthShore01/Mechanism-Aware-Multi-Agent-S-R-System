@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+data/raw/
+runs/
+*.egg-info/
+dist/
+build/
+.ipynb_checkpoints/
+mlruns/
+wandb/
