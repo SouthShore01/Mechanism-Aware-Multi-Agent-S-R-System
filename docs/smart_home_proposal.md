@@ -85,35 +85,27 @@ This project proposes a **vision-based** alternative: using a standard RGB camer
 
 ## Target Object Categories and States
 
+Scope reduced to **3 categories** for a 1-month timeline:
+
 | Object | State Labels | Detection Challenge |
 |--------|-------------|---------------------|
-| Ceiling / desk lamp | ON / OFF | Brightness of light region |
+| Desk / ceiling lamp | ON / OFF | Brightness of light region |
 | Door | OPEN / CLOSED | Angle, gap visibility |
 | Television | ON / OFF | Screen brightness + content |
-| Refrigerator door | OPEN / CLOSED | Door edge angle |
-| Microwave | ON / OFF | Display / interior light |
-| Electric fan | ON / OFF | Blade blur (motion blur cue) |
+
+Refrigerator, microwave, and fan are dropped — they share the same approach and add collection overhead without new insights.
 
 ---
 
 ## Dataset
 
-### Option A — Self-Collected Small Dataset (Recommended for Phase 1)
-- Collect 150–250 images per object category (ON and OFF balanced)
-- Sources: own home, public indoor image repositories, video frame extraction
-- Annotate with bounding boxes (LabelImg / Roboflow) and binary state labels
+### Self-Collected Small Dataset
+- **50–80 images per class per category** (ON and OFF balanced) = ~300–480 images total
+- Sources: own home + Google Images / Unsplash for variety
+- Collect over 2–3 days; annotate with **Roboflow** (free, browser-based, fast)
 - Train/Val/Test split: 70 / 15 / 15
 
-### Option B — Public Datasets (Supplement or Replace)
-| Dataset | Relevance |
-|---------|-----------|
-| **OpenImages v7** | Contains many household objects with bounding box annotations |
-| **COCO 2017** | Baseline detection; lacks state labels but useful for pretraining |
-| **HACS / ActivityNet** | Video-level; can extract frames for appliance state mining |
-| **SmartHome (CMU / TU Berlin)** | Activity recognition in home environments |
-
-**Phase 1**: Use self-collected images for state classification.
-**Phase 2** (optional): Scale up with OpenImages crops + manual state annotation.
+This size is intentionally small: the goal is to show that fine-tuning a pretrained model on very few examples still outperforms a zero-shot baseline, not to build a production-scale dataset.
 
 ---
 
@@ -131,70 +123,65 @@ This project proposes a **vision-based** alternative: using a standard RGB camer
 
 ## Evaluation Metrics
 
-### Detection (Stage 1)
-- mAP@0.5 on target household object categories
-- Baseline: YOLOv8n zero-shot on COCO classes
-
-### State Classification (Stage 2)
-- Per-class Accuracy, Precision, Recall, F1-score
-- Confusion matrix per object category
-- Robustness evaluation: performance under occlusion / low light / unusual viewpoint
-
-### End-to-End (Stage 3)
-- Advisor correctness rate: fraction of frames where the energy suggestion is appropriate
-- False alert rate: advisor triggers when no action is needed
+| Stage | Metric | Notes |
+|-------|--------|-------|
+| Detection | Visual inspection + detection rate on 30 test images | YOLOv8 pretrained; no retraining needed |
+| State classification | Accuracy, F1-score per category | Main result; compare CLIP vs fine-tuned |
+| End-to-end pipeline | Accuracy drop (GT crops vs predicted crops) | Measures detection→classification error propagation |
+| Energy advisor | Qualitative demo only | 5–10 sample outputs; no formal metric |
 
 ---
 
 ## Experiment Plan
 
-### Experiment 1 — Baseline State Classification
-- Train MobileNetV3 on cropped object images (lamp, door, TV)
-- Report per-category F1 on held-out test set
-- Compare: zero-shot CLIP vs fine-tuned MobileNetV3
+Two core experiments fit within 1 month. The energy advisor serves as a qualitative demo, not a formal experiment.
 
-### Experiment 2 — Effect of Input Crop Quality
-- Compare state classification accuracy using:
-  - Ground-truth bounding box crops
-  - YOLOv8 predicted crops (realistic pipeline)
-- Quantify the detection-to-classification error propagation
+### Experiment 1 — Baseline State Classification (Core)
+- Fine-tune MobileNetV3 on ground-truth cropped images (lamp, door, TV)
+- Compare against zero-shot CLIP as baseline
+- Report per-category Accuracy and F1 on held-out test set
+- **Deliverable**: table showing CLIP vs fine-tuned across 3 categories
 
-### Experiment 3 — Robustness Ablation
-- Evaluate classifier on images with:
-  - Partial occlusion (manually masked 20–40% of object)
-  - Low light (brightness reduced in post-processing)
-  - Off-angle viewpoint (rotated crops)
-- Report F1 degradation per condition
+### Experiment 2 — End-to-End Pipeline Evaluation (Core)
+- Run full pipeline: YOLOv8 detection → MobileNetV3 classification on 30 new test images
+- Compare accuracy using ground-truth crops vs YOLOv8-predicted crops
+- Quantify how detection errors affect state classification
+- **Deliverable**: accuracy drop table (GT crops vs predicted crops) + 5–10 qualitative examples
 
-### Experiment 4 — Rule-Based Advisor Evaluation
-- Construct 30–50 annotated test scenarios with known ground-truth actions
-- Measure advisor precision and recall against human-labeled "correct action"
+### Demo — Rule-Based Energy Advisor (Qualitative)
+- Implement 3 simple rules (light ON → suggest off, door OPEN → alert, TV ON → suggest off)
+- Show 5–10 sample outputs on test images as qualitative demo
+- No formal evaluation; purely illustrative
 
 ---
 
-## Development Roadmap
+## Development Roadmap (4 Weeks)
 
 ```
-Week 1–2:  Data collection and annotation
-           - Collect 100-200 images per target category
-           - Annotate with Roboflow (bounding box + state label)
-           - Set up PyTorch data loaders
+Week 1:  Data collection and annotation                    [~10 hrs]
+         - Collect 50–80 images per class × 3 categories × 2 states
+         - Annotate bounding boxes + state labels in Roboflow
+         - Export dataset; set up PyTorch data loaders
 
-Week 3–4:  Stage 1 + Stage 2 implementation
-           - Run YOLOv8 zero-shot baseline; evaluate on target classes
-           - Fine-tune MobileNetV3 on annotated state crops
-           - Experiment 1: baseline classification results
+Week 2:  Stage 1 + Stage 2 implementation                 [~10 hrs]
+         - Run YOLOv8n zero-shot on test images; verify it detects
+           lamp / door / TV reliably
+         - Fine-tune MobileNetV3 on ground-truth crops
+         - Experiment 1: CLIP vs fine-tuned results table
 
-Week 5–6:  Pipeline integration + robustness experiments
-           - Connect detection output to classifier input
-           - Experiment 2: crop quality effect
-           - Experiment 3: robustness ablation
+Week 3:  Pipeline integration + Experiment 2              [~8 hrs]
+         - Connect YOLOv8 output crops → MobileNetV3 input
+         - Run end-to-end on 30 test images
+         - Compute accuracy with GT crops vs predicted crops
+         - Implement 3-rule energy advisor; collect demo outputs
 
-Week 7–8:  Energy advisor + final evaluation
-           - Implement rule-based advisor (Stage 3)
-           - Experiment 4: end-to-end advisor evaluation
-           - Write report + assemble results tables and figures
+Week 4:  Analysis, visualization, and report              [~8 hrs]
+         - Assemble results tables + qualitative examples
+         - Write report (introduction, pipeline, experiments, conclusion)
+         - Final cleanup and submission
 ```
+
+**Total estimated effort**: ~36 hours over 4 weeks (~9 hrs/week)
 
 ---
 
