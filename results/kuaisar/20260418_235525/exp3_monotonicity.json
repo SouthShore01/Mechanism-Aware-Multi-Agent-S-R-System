@@ -1,0 +1,9 @@
+{
+  "linear_violation_rate": 0.0,
+  "loglinear_violation_rate": 1.0,
+  "n_trials": 300,
+  "interpretation": {
+    "linear": "0% expected (provably monotone by Duetting et al. Thm 1)",
+    "loglinear": "100% in adversarial case (borrowed-strength failure)"
+  }
+}

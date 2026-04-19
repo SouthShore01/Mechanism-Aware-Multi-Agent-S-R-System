@@ -1,0 +1,11 @@
+rule,k,manipulation_gain,rank_promotion,ndcg_drop
+linear,1,0.0,0.0,0.0
+linear,2,0.0,0.012,0.0
+linear,5,0.2,0.016,0.0
+linear,10,0.2,0.016,0.0
+linear,20,0.2,0.016,0.0
+loglinear,1,0.0,0.0,0.0
+loglinear,2,0.0,0.0,0.0
+loglinear,5,0.0,0.094,0.0
+loglinear,10,0.0,0.592,0.0
+loglinear,20,0.8,0.652,0.0

@@ -2,30 +2,29 @@
 
 > **Course**: Multi-Agent Systems / Game Theoretic Design and Analysis of Agentic AI
 > **Theme**: Theme 4 — Game Theoretic Design and Analysis of Agentic AI
-> **Mid-term Report Deadline**: March 24, 2026
 
-A research-engineering project extending the **token auction framework** from
-*Mechanism Design for Large Language Models* (WWW 2024 Best Paper) into the
-**slate-level search & recommendation** domain, where multiple LLM-based agents
-with conflicting objectives collaborate via auction-style aggregation.
+A research-engineering project extending the **slate auction framework** from
+*Mechanism Design for Large Language Models* (Duetting et al., WWW 2024 Best Paper)
+into the **item-level search & recommendation** domain, where multiple scoring agents
+with conflicting objectives collaborate via incentive-compatible auction aggregation.
 
 ---
 
 ## Problem Motivation
 
 Traditional search and recommendation systems combine multiple ranking signals
-(relevance, personalization, diversity, safety, business value) through manually
-tuned weights. This approach has three critical weaknesses:
+(relevance, personalization, diversity, safety) through manually tuned weights.
+This has three critical weaknesses:
 
 1. **Opacity**: No principled explanation of why item A is ranked above item B
 2. **No incentive structure**: Agents representing different objectives have no
    mechanism to express preference strength or resolve conflicts
-3. **Manipulation vulnerability**: A single dominant objective can override others
-   silently without an audit trail
+3. **Manipulation vulnerability**: A dominant objective can override others silently
 
-This project addresses these weaknesses by treating the ranking problem as a
-**multi-agent auction** where each agent submits a distribution over candidates
-and a scalar bid, and a mechanism-aware aggregation rule produces the final slate.
+This project addresses all three by treating the ranking problem as a
+**multi-agent slate auction** where each agent submits a score distribution over
+candidates and a scalar bid, and a mechanism-aware aggregation rule produces the
+final ranked slate with a full per-position influence audit trail.
 
 ---
 
@@ -33,119 +32,128 @@ and a scalar bid, and a mechanism-aware aggregation rule produces the final slat
 
 | Original (Duetting et al., 2024) | This Project |
 |----------------------------------|--------------|
-| Unit of decision: **next token** | Unit of decision: **next item / position** |
-| Agents: LLM advertisers | Agents: Relevance, Personalization, Diversity, Safety, Business |
+| Unit of decision: **next token** | Unit of decision: **ranked item / slate position** |
+| Agents: LLM text generators | Agents: Relevance, Personalization, Diversity, Safety |
 | Distribution: token probability | Distribution: item score distribution over candidate pool |
 | Bid: scalar weight per token | Bid: scalar influence weight per slate position |
-| Output: token sequence | Output: ranked slate (search results / recommendation list) |
-| Payment: per-token influence cost | Payment: per-position influence audit log |
+| Output: token sequence | Output: ranked slate (Top-K items) |
+| Payment: per-token critical bid | Payment: per-position second-price influence cost |
 
-The key theoretical bridge: **monotone aggregation + second-price-style payments**
-still hold when the decision unit changes from tokens to items, as long as agents'
-preferences satisfy the robust preference condition from the original paper.
+The key theoretical bridge: **monotone aggregation + second-price payments**
+hold when the decision unit changes from tokens to items, provided agents'
+preferences satisfy the robust preference condition (Duetting et al., Thm. 1).
 
 ---
 
-## Paper Survey (4 Core Papers)
+## Bid Mechanism and Incentive Design
 
-### Paper 1 — Theoretical Backbone
-**Duetting P, Mirrokni V, Paes Leme R, Xu H, Zuo S.**
-*Mechanism Design for Large Language Models.*
-ACM Web Conference 2024 (Best Paper Award). arXiv:2310.10826.
+> **Q (instructor feedback)**: *It is not clear how the bids submitted by agents
+> appear in their value function. What prevents them from making potentially
+> infinite bids? I think you perhaps have some budget constraint or a model where
+> higher bids decrease value.*
 
-- Proposes token-by-token auction for multi-LLM output aggregation
-- Key results: monotonicity ↔ incentive compatibility; second-price rule under
-  robust preferences; linear aggregation is monotone, log-linear is not
-- **Role in this project**: provides the aggregation functions, payment design, and
-  the theoretical condition (monotonicity) we test for in the S&R setting
+### Value Function
 
-### Paper 2 — Multi-Agent Architecture
-**Yang Y, Chai H, Shao S et al.**
-*AgentNet: Decentralized Evolutionary Coordination for LLM-Based Multi-Agent Systems.*
-arXiv:2504.00587. 2025.
+Each agent `i` has an objective-specific **value function** over the aggregated
+output distribution `q`:
 
-- Proposes decentralized, graph-structured agent coordination with dynamic routing
-  and RAG-based memory sharing across agents
-- **Role in this project**: informs the system architecture — each agent is a node
-  in the coordination graph; contrast with our approach: AgentNet coordinates via
-  communication, we coordinate via **incentive-compatible bidding**
+```
+V_i(q) = Σ_x  q(x) · p_i(x)      (inner product of q with agent i's score vector)
+```
 
-### Paper 3 — Learning to Collaborate
-**Park C, Han S, Guo X, Ozdaglar AE, Zhang K, Kim JK.**
-*MAPoRL: Multi-Agent Post-Co-Training for Collaborative LLMs with Reinforcement Learning.*
-ACL 2025 (pp. 30215–30248).
+- Relevance agent:       `V_rel(q)  = E_{x~q}[BM25(x, query)]`
+- Personalization agent: `V_per(q)  = E_{x~q}[affinity(x, user_history)]`
+- Diversity agent:       `V_div(q)  = E_{x~q}[diversity_score(x, slate)]`
+- Safety agent:          `V_saf(q)  = E_{x~q}[safety_score(x)]`
 
-- Multi-agent RL post-training to make LLMs learn collaborative behavior
-  rather than relying on prompt engineering alone
-- **Role in this project**: establishes that coordination can be *learned*, not
-  just rule-based; opens the future direction of learning agent bid strategies
-  via RL; provides the contrast: mechanism design (rule-based) vs RL (learned)
+### Bid Enters Utility via the Aggregation Rule
 
-### Paper 4 — Decision-Making & Regret
-**Park C, Chen Z, Ozdaglar A, Zhang K.**
-*Post-Training LLMs as Better Decision-Making Agents: A Regret-Minimization Approach.*
-arXiv:2511.04393. 2025.
+Under **linear aggregation**, the influence weight of agent `i` is:
 
-- Frames LLM post-training as regret minimization in online learning / game theory
-- **Role in this project**: elevates the framing from "ranking quality" to
-  "sequential decision quality under strategic pressure"; justifies the
-  manipulation stress test experiments; connects to regret analysis of
-  auction mechanisms under non-truthful bidding
+```
+λ_i = b_i / Σ_j b_j
+```
+
+so the final distribution is:
+
+```
+q(x) = Σ_i λ_i · p_i(x)
+```
+
+Increasing `b_i` increases `λ_i`, which pulls `q` closer to `p_i`, which
+increases `V_i(q)`. The bid thus enters the utility function *indirectly*
+through `λ_i`.
+
+### What Prevents Infinite Bidding: Second-Price Payment
+
+Each agent pays the **critical bid** `π_i` — the minimum bid needed to achieve
+its current influence share (computed by binary search, `src/mechanism/payment.py`):
+
+```
+π_i = inf { b : λ_i(b, b_{-i}) ≥ λ_i(b_i, b_{-i}) }
+```
+
+The full utility is:
+
+```
+U_i(b_i) = V_i(q(b_i, b_{-i}))  −  π_i(b_i, b_{-i})
+```
+
+**Why infinite bidding is suboptimal**:
+
+- As `b_i → ∞`,  `λ_i → 1` (bounded by 1), so **marginal value gain → 0**
+- Meanwhile `π_i` grows proportionally with `b_i`
+- Therefore `U_i(b_i) → −∞` as `b_i → ∞`
+
+This is the direct analogue of the Generalized Second-Price (GSP) auction
+(Edelman et al., 2007): overbidding beyond your true valuation strictly
+decreases net utility. Under this mechanism, truthful bidding `b_i = b_i*`
+(where `b_i*` reflects true valuation weight) is a dominant strategy
+(Duetting et al., Thm. 1; Vickrey, 1961).
+
+### Budget Constraint (Practical Enforcement)
+
+In our implementation, bids are further constrained by **normalization**:
+`Σ b_i = 1`. Each agent is allocated an *influence budget* proportional to
+its designated role weight (e.g., relevance=0.4, diversity=0.2). The dynamic
+bid variant (Exp 1) adapts bids within a bounded range `[0.24, 0.56]` based
+on query-specific confidence, ensuring the budget constraint is never violated.
 
 ---
 
 ## System Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                        User Query / Context                   │
-└─────────────────────────────┬────────────────────────────────┘
-                              │
-                              ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    Candidate Generation Layer                  │
-│  ┌─────────────────┐          ┌────────────────────────────┐  │
-│  │  Retrieval Agent │          │  Recommendation Agent      │  │
-│  │  (BM25 + Dense)  │          │  (Sequential RecBole)      │  │
-│  └────────┬────────┘          └──────────────┬─────────────┘  │
-│           └──────────────┬───────────────────┘                │
-│                          ▼                                     │
-│              Unified Candidate Pool  (top-K items)            │
-└─────────────────────────┬────────────────────────────────────┘
-                          │
-                          ▼
-┌──────────────────────────────────────────────────────────────┐
-│                   Scoring Agent Layer                          │
-│                                                                │
-│   Agent 1: Relevance       → score distribution + bid b₁     │
-│   Agent 2: Personalization → score distribution + bid b₂     │
-│   Agent 3: Diversity       → score distribution + bid b₃     │
-│   Agent 4: Safety          → score distribution + bid b₄     │
-│  [Agent 5: Business/Sponsor→ score distribution + bid b₅]    │
-│                                                                │
-│  Each agent outputs: p_i ∈ Δ(CandidatePool), b_i ∈ ℝ₊       │
-└─────────────────────────┬────────────────────────────────────┘
-                          │
-                          ▼
-┌──────────────────────────────────────────────────────────────┐
-│                  Mechanism / Aggregation Layer                 │
-│                                                                │
-│  Aggregation Rule (choose one):                               │
-│    Linear:     q(x) = Σ λᵢ · pᵢ(x)    [MONOTONE ✓]         │
-│    Log-linear: q(x) ∝ Π pᵢ(x)^λᵢ      [NOT monotone ✗]     │
-│                                                                │
-│  where λᵢ = bᵢ / Σⱼ bⱼ   (normalized bids)                  │
-│                                                                │
-│  Payment (second-price-style):                                │
-│    tᵢ = (critical bid to maintain current influence)          │
-│    Logged as: audit_trace[position][agent] = influence_cost   │
-└─────────────────────────┬────────────────────────────────────┘
-                          │
-                          ▼
-┌──────────────────────────────────────────────────────────────┐
-│               Final Ranked Slate  (Top-N items)               │
-│               + Payment Audit Log per Position                 │
-└──────────────────────────────────────────────────────────────┘
+  User Query + Context
+         │
+         ▼
+  Candidate Pool (BM25 recall, top-100 items)
+         │
+         ▼
+  ┌──────────────────────────────────────────┐
+  │           Scoring Agent Layer            │
+  │                                          │
+  │  Relevance Agent       bid b₁ = 0.40    │
+  │  Personalization Agent bid b₂ = 0.30    │
+  │  Diversity Agent       bid b₃ = 0.20    │
+  │  Safety Agent          bid b₄ = 0.10    │
+  │                                          │
+  │  Each outputs: p_i ∈ Δ(Pool), b_i ∈ ℝ₊ │
+  └──────────────┬───────────────────────────┘
+                 │
+                 ▼
+  ┌──────────────────────────────────────────┐
+  │         Mechanism / Aggregation          │
+  │                                          │
+  │  Linear:     q = Σ λᵢpᵢ    [IC ✓]      │
+  │  Log-linear: q ∝ Π pᵢ^λᵢ  [IC ✗]      │
+  │                                          │
+  │  λᵢ = bᵢ / Σbⱼ                         │
+  │  πᵢ = critical bid (second-price)        │
+  └──────────────┬───────────────────────────┘
+                 │
+                 ▼
+  Ranked Slate (Top-10) + Influence Audit Log
 ```
 
 ---
@@ -156,209 +164,122 @@ arXiv:2511.04393. 2025.
 .
 ├── README.md
 ├── requirements.txt
+├── run_pipeline.py                      # End-to-end demo (KuaiSAR, single query)
 ├── configs/
-│   ├── default.yaml                   # Default hyperparameters
-│   └── experiment_configs/
-│       ├── linear_agg.yaml
-│       ├── loglinear_agg.yaml
-│       └── fixed_weight.yaml
-├── docs/
-│   ├── report_outline.md              # 10-page midterm report outline
-│   └── experiment_design.md           # Detailed experiment protocol
+│   └── default.yaml
+├── data/
+│   ├── raw/KuaiSAR_final/               # Raw CSVs (not committed)
+│   └── processed/                       # Cached loader output (JSON)
+├── results/
+│   └── kuaisar/<timestamp>/
+│       ├── run_meta.json
+│       ├── exp1_ranking_quality.csv
+│       ├── exp2_diversity_pareto.csv
+│       ├── exp3_monotonicity.json
+│       ├── exp4_manipulation.csv
+│       ├── exp5_utility.csv
+│       └── summary.json
 ├── src/
 │   ├── agents/
-│   │   ├── base_agent.py              # Abstract ScoringAgent interface
-│   │   ├── relevance_agent.py         # BM25 / embedding similarity scorer
-│   │   ├── personalization_agent.py   # User history-based scorer
-│   │   ├── diversity_agent.py         # MMR / coverage-based scorer
-│   │   └── safety_agent.py            # Rule-based / classifier-based filter
+│   │   ├── base_agent.py                # Abstract ScoringAgent interface
+│   │   ├── relevance_agent.py           # BM25 scorer
+│   │   ├── personalization_agent.py     # User history scorer
+│   │   ├── diversity_agent.py           # MMR / category diversity scorer
+│   │   └── safety_agent.py             # Rule-based safety filter
 │   ├── mechanism/
-│   │   ├── aggregation.py             # Linear & log-linear aggregation rules
-│   │   ├── payment.py                 # Critical-bid / second-price-style payment
-│   │   └── auction.py                 # Main auction orchestrator (bid → slate)
+│   │   ├── aggregation.py              # Linear & log-linear aggregation
+│   │   ├── payment.py                  # Critical-bid (second-price) payment
+│   │   ├── auction.py                  # Auction orchestrator → AuctionResult
+│   │   └── utility.py                  # Agent value functions U_i = V_i − π_i
 │   ├── pipeline/
-│   │   ├── retrieval.py               # BM25 + Faiss dense retrieval
-│   │   ├── recommendation.py          # RecBole sequential model wrapper
-│   │   └── candidate_pool.py          # Merge retrieval + rec candidates
+│   │   └── candidate_pool.py           # BM25 candidate retrieval
 │   ├── data/
-│   │   ├── kuaisar_loader.py          # KuaiSAR / KuaiSAR-small data loader
-│   │   └── preprocessing.py           # Feature extraction, query parsing
+│   │   └── kuaisar_loader.py           # KuaiSAR CSV loader + JSON cache
 │   └── evaluation/
-│       ├── metrics.py                 # NDCG@K, Recall@K, ILD (diversity)
-│       ├── manipulation_test.py       # Strategic bid exaggeration stress test
-│       └── audit_logger.py            # Per-position influence audit trace
-├── experiments/
-│   ├── run_baseline.py                # Fixed-weight score fusion baseline
-│   ├── run_linear_agg.py              # Linear auction aggregation
-│   ├── run_loglinear_agg.py           # Log-linear (monotonicity failure case)
-│   └── run_manipulation_stress.py     # Strategic agent manipulation test
-└── notebooks/
-    ├── 01_data_exploration.ipynb
-    ├── 02_aggregation_analysis.ipynb
-    └── 03_results_visualization.ipynb
+│       ├── metrics.py                  # NDCG@K, Recall@K, ILD, MRR, Coverage
+│       └── manipulation_test.py        # Bid inflation stress test
+└── experiments/
+    └── run_kuaisar_experiments.py      # Full 5-experiment suite (saves to results/)
 ```
 
 ---
 
-## Framework & Tech Stack
+## Experimental Results (KuaiSAR Dataset)
 
-| Component | Framework | Reason |
-|-----------|-----------|--------|
-| Agent orchestration | **LangGraph** | Stateful, auditable node-based workflow; supports DAG routing and per-node logging — better than AutoGen for controlled pipelines |
-| Recommendation baseline | **RecBole** | Production-grade recsys framework with 70+ models; use SASRec or GRU4Rec as sequential baseline |
-| Dense retrieval | **Faiss** | Standard ANN library for vector candidate recall; wrap with sentence-transformers |
-| Sparse retrieval | **rank_bm25** | Lightweight BM25 for lexical recall |
-| LLM scoring | **LangChain + OpenAI/Anthropic API** | LLM-in-the-loop scoring for relevance and safety agents |
-| Data | **KuaiSAR-small** (Phase 1) → **KuaiSAR** (Phase 2) | Unified real-world search & recommendation dataset from Kuaishou |
-| Experiment tracking | **MLflow** or **Weights & Biases** | Track aggregation variants and ablations |
-| Visualization | **Plotly / Streamlit** | Interactive audit trace visualization for demo |
+> Dataset: 3,000 items · 50 queries · 36 categories · pool\_size=100
 
----
+### Experiment 1 — Ranking Quality
 
-## Datasets
+| Method | NDCG@5 | NDCG@10 | Recall@10 | ILD@10 | MRR | **F-score** |
+|--------|-------:|--------:|----------:|-------:|----:|------------:|
+| single\_agent | 0.069 | 0.095 | 0.125 | 0.060 | 0.073 | 0.074 |
+| fixed\_weight | 0.251 | 0.317 | 0.466 | 0.162 | 0.238 | 0.214 |
+| **linear\_dynamic** | 0.228 | 0.299 | 0.456 | **0.262** | 0.219 | **0.279** |
+| loglinear | **0.264** | **0.329** | **0.476** | 0.069 | **0.249** | 0.115 |
 
-### Primary: KuaiSAR
-- **Source**: [kuaisar.github.io](https://kuaisar.github.io) / Zenodo record 8181109
-- **Scale**: 25,877 users · 6.89M items · 453K queries · 19.6M actions · 19 days
-- **Key feature**: Records **user transitions between search and recommendation**,
-  making it the only public dataset that supports unified S&R evaluation
-- **Why it fits**: Provides both retrieval-style interactions (query → item) and
-  recommendation-style interactions (history → item) in a single log, exactly
-  matching our unified candidate pool design
+> F-score = 2·NDCG·ILD / (NDCG + ILD) — joint measure of relevance and diversity.
 
-### Auxiliary
-| Dataset | Role |
-|---------|------|
-| **KuaiSAR-small** | Fast iteration / unit testing (10-day subset) |
-| **KuaiRec** | Near-full observation matrix for offline counterfactual evaluation |
-| **KuaiRand** | Random exposure intervention data for causal/A-B approximation |
+Key findings:
+- Multi-agent (all variants) outperforms single-agent by **3×** on NDCG and **4×** on ILD
+- `linear_dynamic` achieves the best F-score (+30% vs fixed\_weight, +143% vs loglinear)
+- `loglinear`'s higher NDCG comes at a cost: ILD collapses to 0.069 ≈ single-agent (0.060), meaning diversity agent is effectively suppressed by the geometric mean
+- `linear_dynamic` is 5.6% lower on NDCG but 62% higher on ILD — a favorable tradeoff
 
----
+### Experiment 2 — Diversity–Relevance Pareto Frontier
 
-## Experiment Design
+| Diversity Bid | NDCG@10 | ILD@10 | F-score |
+|--------------:|--------:|-------:|--------:|
+| 0.00 | 0.326 | 0.092 | 0.144 |
+| 0.20 ← default | 0.317 | 0.162 | 0.214 |
+| **0.40 ← optimal** | **0.251** | **0.554** | **0.346** |
+| 0.50 | 0.182 | 0.754 | 0.293 |
+| 1.00 | 0.125 | 0.832 | 0.217 |
 
-### Experiment 1 — Ranking Quality (Main Result)
+Changing `diversity_bid` from 0.20 → 0.40 improves F-score by **+61%** with no
+model retraining — illustrating the auction's role as a principled control knob.
 
-**Goal**: Compare final slate quality across aggregation methods.
+### Experiment 3 — Monotonicity Verification (300 trials)
 
-| Method | Description |
-|--------|-------------|
-| `fixed_weight` | Static manually tuned weights per agent |
-| `linear_agg` | Auction-style linear aggregation with normalized bids |
-| `loglinear_agg` | Log-linear aggregation (expected to show manipulation failure) |
-| `single_agent` | Ablation: only relevance agent, no multi-agent |
+| Mechanism | Violation Rate | Expected |
+|-----------|---------------:|---------|
+| Linear | **0.0%** | ~0% (Duetting et al. Thm. 1) |
+| Log-linear | **100.0%** | >0% (adversarial borrowed-strength failure) |
 
-**Metrics**: NDCG@5, NDCG@10, Recall@20, MRR
-**Data split**: Leave-last-out on KuaiSAR-small
+The adversarial case: agent `i` has weak preference for item `x*` (score ≈ 0.4)
+while all other agents have strong preference (score ≈ 0.9). Increasing `b_i`
+reduces `λ_j` for `j ≠ i`, destroying the "borrowed strength" → `q(x*)` decreases
+despite the higher bid. Linear aggregation is immune by algebra.
 
----
+### Experiment 4 — Manipulation Stress Test
 
-### Experiment 2 — Diversity & Coverage
+| k | Linear Gain | Linear Rank↑ | Loglinear Gain | Loglinear Rank↑ |
+|--:|------------:|-------------:|---------------:|----------------:|
+| 1 | 0.000 | 0.000 | 0.000 | 0.000 |
+| 5 | 0.200 | 0.016 | 0.000 | 0.094 |
+| 10 | 0.200 | 0.016 | 0.000 | **0.592** |
+| 20 | **0.200** | **0.016** | **0.800** | **0.652** |
 
-**Goal**: Show that mechanism-coordinated multi-agent outperforms single-objective
-ranking on diversity without sacrificing relevance.
+> k = bid inflation multiplier. Rank↑ = normalized rank improvement of manipulator's items.
 
-**Metrics**:
-- ILD (Intra-List Diversity): average pairwise item distance in embedding space
-- Coverage: fraction of item categories represented in top-10
-- α-NDCG: diversity-aware NDCG
-
-**Ablation**: vary bid of Diversity Agent from 0 → 1 with other bids fixed, observe
-NDCG vs ILD Pareto frontier.
+- **Linear**: gain saturates at 0.20 for k ≥ 5 — second-price property bounds the gain
+- **Log-linear**: appears safe for k ≤ 9, then collapses at k = 10 (rank↑ = 59%) — threshold manipulation failure, more dangerous in practice
 
 ---
 
-### Experiment 3 — Monotonicity Verification
+## References
 
-**Goal**: Empirically verify the theoretical result that linear aggregation is
-monotone (incentive-compatible) while log-linear is not.
-
-**Protocol**:
-1. Fix all agents' distributions; increase a single agent's bid by Δ
-2. Measure change in that agent's influence score in the final distribution
-3. Linear should show non-decreasing influence (monotone)
-4. Log-linear should show non-monotone behavior at certain configurations
-
-**Metric**: `influence_delta` = change in KL-divergence between aggregated
-distribution and the perturbing agent's distribution
+1. Duetting P, Mirrokni V, Paes Leme R, Xu H, Zuo S. Mechanism design for large language models. *ACM Web Conference (WWW)* 2024. arXiv:2310.10826.
+2. Vickrey W. Counterspeculation, auctions, and competitive sealed tenders. *Journal of Finance* 16(1), 1961.
+3. Myerson R. Optimal auction design. *Mathematics of Operations Research* 6(1), 1981.
+4. Edelman B, Ostrovsky M, Schwarz M. Internet advertising and the generalized second-price auction. *American Economic Review* 97(1), 2007.
+5. Yang Y, Chai H, Shao S, et al. AgentNet: Decentralized evolutionary coordination for LLM-based multi-agent systems. arXiv:2504.00587. 2025.
+6. Park C, Han S, Guo X, Ozdaglar AE, Zhang K, Kim JK. MAPoRL: Multi-agent post-co-training for collaborative LLMs with reinforcement learning. *ACL* 2025.
+7. Park C, Chen Z, Ozdaglar A, Zhang K. Post-training LLMs as better decision-making agents: A regret-minimization approach. arXiv:2511.04393. 2025.
+8. Gao Y, et al. KuaiSAR: A unified search and recommendation dataset. *CIKM* 2023.
 
 ---
 
-### Experiment 4 — Manipulation Stress Test (Key Research Contribution)
-
-**Goal**: Simulate a strategic agent that exaggerates its bid to gain disproportionate
-influence; measure system robustness.
-
-**Protocol**:
-1. Set one agent (e.g., Business/Sponsor) to submit inflated bid = true_value × k
-   for k ∈ {1, 2, 5, 10}
-2. Run linear vs log-linear aggregation
-3. Measure: (a) manipulation gain = increase in that agent's influence beyond its
-   true contribution; (b) ranking quality degradation for other metrics
-
-**Expected result**:
-- Linear aggregation: bounded manipulation gain (second-price property limits gain)
-- Log-linear aggregation: unbounded manipulation, quality collapse
-
-**Connection to Paper 4 (Regret-Minimization)**: strategic agent's regret
-under both mechanisms can be analyzed as an online learning problem.
-
----
-
-### Experiment 5 — Audit Trace Interpretability
-
-**Goal**: Demonstrate that the mechanism produces human-readable, position-level
-influence attribution.
-
-**Output format** (per query, per result position):
-
-```json
-{
-  "query": "短视频 搜索",
-  "position": 1,
-  "item_id": "video_3829",
-  "agents": {
-    "relevance":       {"bid": 0.40, "influence_share": 0.38, "payment": 0.12},
-    "personalization": {"bid": 0.30, "influence_share": 0.29, "payment": 0.09},
-    "diversity":       {"bid": 0.20, "influence_share": 0.21, "payment": 0.06},
-    "safety":          {"bid": 0.10, "influence_share": 0.12, "payment": 0.04}
-  },
-  "aggregation_rule": "linear",
-  "final_score": 0.847
-}
-```
-
----
-
-## Development Roadmap
-
-```
-Phase 1 (Weeks 1-2): Data + Candidate Pipeline
-  - Download KuaiSAR-small
-  - Implement kuaisar_loader.py and preprocessing.py
-  - Build BM25 retrieval + Faiss dense retrieval
-  - Set up unified candidate pool
-
-Phase 2 (Weeks 3-4): Agents + Mechanism
-  - Implement 4 scoring agents (relevance, personalization, diversity, safety)
-  - Implement linear_aggregation + payment in mechanism/
-  - Wire into LangGraph workflow
-  - Unit test: monotonicity check on toy data
-
-Phase 3 (Weeks 5-6): Experiments 1-3
-  - Run baseline comparisons (fixed-weight vs linear_agg)
-  - Implement and run log-linear as failure case
-  - Diversity and monotonicity experiments
-
-Phase 4 (Weeks 7-8): Manipulation Test + Report
-  - Experiment 4: strategic bid stress test
-  - Audit trace visualization (Streamlit demo)
-  - Write midterm report + assemble results tables
-```
-
----
-
-## Installation
+## Installation & Reproduction
 
 ```bash
 git clone https://github.com/SouthShore01/Mechanism-Aware-Multi-Agent-S-R-System.git
@@ -366,52 +287,26 @@ cd Mechanism-Aware-Multi-Agent-S-R-System
 pip install -r requirements.txt
 ```
 
-Download KuaiSAR-small:
+Download KuaiSAR data (Zenodo record 8181109):
 ```bash
-# From Zenodo (record 8181109)
-# KuaiSAR-small = KuaiSAR.zip on Zenodo (10-day subset, 2023/5/22-5/31)
 wget https://zenodo.org/records/8181109/files/KuaiSAR.zip
 unzip KuaiSAR.zip -d data/raw/
 ```
 
-Run baseline experiment:
+Run all experiments (results saved automatically to `results/kuaisar/<timestamp>/`):
 ```bash
-python experiments/run_baseline.py --config configs/experiment_configs/fixed_weight.yaml
+python experiments/run_kuaisar_experiments.py --n_queries 50 --max_items 3000
 ```
 
----
+Run individual experiments:
+```bash
+python experiments/run_kuaisar_experiments.py --exp 1        # ranking quality only
+python experiments/run_kuaisar_experiments.py --exp 1,3,4    # subset
+python experiments/run_kuaisar_experiments.py --exp 2 --div_steps 21  # finer Pareto sweep
+```
 
-## Key Theoretical Results Referenced
-
-| Theorem (Duetting et al.) | Implication for this Project |
-|---------------------------|------------------------------|
-| Monotonicity ↔ IC | Linear aggregation is incentive-compatible; log-linear is not |
-| Second-price under robust preferences | Agents cannot gain by overbidding under linear rule |
-| Welfare-maximizing rule = weighted avg | Our linear aggregation is optimal under KL-divergence preference |
-
-**Extension we test**: Do these properties hold when the decision unit is an
-*item slate position* rather than a *token*? Our Experiments 3 & 4 test this.
-
----
-
-## Positioning for LLM Internship Applications
-
-This project demonstrates:
-
-- **System design**: multi-agent LLM orchestration with LangGraph, not just a chatbot demo
-- **Research depth**: mechanism design theory applied to a real retrieval/ranking system
-- **Experimental rigor**: ablations, stress tests, offline evaluation with real industry data
-- **Auditability**: position-level influence attribution — a key concern in production recommendation systems
-- **Breadth**: touches LLM agents + search/IR + recsys + game theory + RL (MAPoRL connection)
-
-**Target roles**: LLM Application Engineer, Agent Systems Researcher, Search & Recommendation Engineer, Applied Scientist (Intern)
-
----
-
-## References
-
-1. Duetting P, Mirrokni V, Paes Leme R, Xu H, Zuo S. Mechanism design for large language models. WWW 2024. arXiv:2310.10826.
-2. Yang Y, Chai H, Shao S, et al. AgentNet: Decentralized evolutionary coordination for LLM-based multi-agent systems. arXiv:2504.00587. 2025.
-3. Park C, Han S, Guo X, Ozdaglar AE, Zhang K, Kim JK. MAPoRL: Multi-agent post-co-training for collaborative LLMs with reinforcement learning. ACL 2025.
-4. Park C, Chen Z, Ozdaglar A, Zhang K. Post-training LLMs as better decision-making agents: A regret-minimization approach. arXiv:2511.04393. 2025.
-5. He R, McAuley J. KuaiSAR: A unified search and recommendation dataset. CIKM 2023.
+End-to-end pipeline demo (single query with audit trace):
+```bash
+python run_pipeline.py --rule linear --n_queries 5
+python run_pipeline.py --rule loglinear --n_queries 5
+```

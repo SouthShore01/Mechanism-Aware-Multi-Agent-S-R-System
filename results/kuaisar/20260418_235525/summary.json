@@ -1,0 +1,114 @@
+{
+  "run": {
+    "timestamp": "20260418_235525",
+    "n_queries": 50,
+    "max_items": 3000,
+    "max_users": 19,
+    "n_categories": 36,
+    "top_k": 10,
+    "pool_size": 100,
+    "experiments_run": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ]
+  },
+  "exp1_ranking": {
+    "single_agent": {
+      "ndcg5": 0.0688,
+      "ndcg10": 0.0954,
+      "rec10": 0.1249,
+      "ild": 0.06,
+      "mrr": 0.0731,
+      "cov": 1.0
+    },
+    "fixed_weight": {
+      "ndcg5": 0.251,
+      "ndcg10": 0.3167,
+      "rec10": 0.4658,
+      "ild": 0.1618,
+      "mrr": 0.2384,
+      "cov": 1.0
+    },
+    "linear_dynamic": {
+      "ndcg5": 0.228,
+      "ndcg10": 0.2988,
+      "rec10": 0.4558,
+      "ild": 0.2618,
+      "mrr": 0.2189,
+      "cov": 1.0
+    },
+    "loglinear": {
+      "ndcg5": 0.2638,
+      "ndcg10": 0.3288,
+      "rec10": 0.4758,
+      "ild": 0.0693,
+      "mrr": 0.2494,
+      "cov": 1.0
+    }
+  },
+  "exp2_best_diversity_bid": {
+    "div_bid": 0.4,
+    "ndcg10": 0.25117889397920334,
+    "ild10": 0.5542222222668,
+    "cov10": 1.0
+  },
+  "exp3_monotonicity": {
+    "linear": 0.0,
+    "loglinear": 1.0
+  },
+  "exp4_manipulation_at_k20": {
+    "linear": {
+      "k": 20,
+      "manipulator": "diversity",
+      "baseline_influence": 0.7,
+      "inflated_influence": 0.9,
+      "manipulation_gain": 0.20000000000000007,
+      "rank_promotion": 0.016000000000000004,
+      "ndcg_at_k": 0.0,
+      "ndcg_drop": 0.0
+    },
+    "loglinear": {
+      "k": 20,
+      "manipulator": "diversity",
+      "baseline_influence": 0.1,
+      "inflated_influence": 0.9,
+      "manipulation_gain": 0.8,
+      "rank_promotion": 0.652,
+      "ndcg_at_k": 0.0,
+      "ndcg_drop": 0.0
+    }
+  },
+  "exp5_utility": {
+    "relevance": {
+      "value": 0.23275119294413496,
+      "payment": 0.39984130855376593,
+      "utility": -0.16709011560963097,
+      "influence_share": 0.4000000000000001,
+      "bid": 0.4
+    },
+    "personalization": {
+      "value": 0.011107098963602098,
+      "payment": 0.2999267577825074,
+      "utility": -0.28881965881890526,
+      "influence_share": 0.30000000000000004,
+      "bid": 0.3
+    },
+    "diversity": {
+      "value": 0.011226193045109455,
+      "payment": 0.19989013669876102,
+      "utility": -0.18866394365365155,
+      "influence_share": 0.20000000000000004,
+      "bid": 0.2
+    },
+    "safety": {
+      "value": 0.009999999999,
+      "payment": 0.09991455077125856,
+      "utility": -0.08991455077225856,
+      "influence_share": 0.10000000000000002,
+      "bid": 0.1
+    }
+  }
+}

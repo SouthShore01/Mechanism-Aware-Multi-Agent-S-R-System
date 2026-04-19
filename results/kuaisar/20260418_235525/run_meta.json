@@ -1,0 +1,16 @@
+{
+  "timestamp": "20260418_235525",
+  "n_queries": 50,
+  "max_items": 3000,
+  "max_users": 19,
+  "n_categories": 36,
+  "top_k": 10,
+  "pool_size": 100,
+  "experiments_run": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ]
+}
