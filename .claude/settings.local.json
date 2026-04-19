@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python experiments/run_baseline.py)",
+      "Bash(pip install:*)",
+      "Bash(python -c ':*)"
+    ]
+  }
+}

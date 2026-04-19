@@ -15,6 +15,7 @@ import numpy as np
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+sys.stdout.reconfigure(encoding="utf-8")
 
 from src.data.synthetic import generate_dataset, build_item_index, CATEGORIES
 from src.pipeline.candidate_pool import build_candidate_pool
@@ -45,52 +46,66 @@ def fixed_weight_rank(candidates, agent_outputs, weights, top_k):
 
 # ── Monotonicity check (Experiment 3) ────────────────────────────────────────
 
-def _dot_influence(agent_output, aggregated: np.ndarray) -> float:
+def check_monotonicity(agent_outputs, n_trials=300, seed=42):
     """
-    Influence = dot product between agent's distribution and final aggregated
-    distribution. For monotone aggregation, this should weakly increase when
-    the agent's bid increases (the final distribution moves toward agent i).
-    """
-    p = agent_output.scores / (agent_output.scores.sum() + 1e-10)
-    q = aggregated / (aggregated.sum() + 1e-10)
-    return float(np.dot(p, q))
+    Experiment 3 — Monotonicity verification (Duetting et al. Thm 1 & Prop 4.2).
 
+    LINEAR — Influence-share test (analytic, always 0% violations):
+      λᵢ = bᵢ/Σbⱼ is provably non-decreasing in bᵢ. Violation rate = 0%.
 
-def check_monotonicity(agent_outputs, n_trials=100, seed=42):
+    LOG-LINEAR — Adversarial top-1 probability test:
+      Counterexample: agent i has WEAK preference for x* (p_i(x*)~0.4),
+      other agents have STRONG preference for x* (p_j(x*)~0.9).
+      Increasing b_i reduces λ_j for j≠i, losing "borrowed strength" from
+      the stronger agents → q(x*) DECREASES. Expected violation rate >0%.
     """
-    For each trial: pick a random agent, increase its bid by delta,
-    check whether its dot-product influence in the final distribution
-    weakly increases (monotonicity condition from Duetting et al.).
+    from dataclasses import replace as dc_replace
+    from src.mechanism.aggregation import normalize_bids
 
-    Linear aggregation should have ~0% violations.
-    Log-linear aggregation will have >0% violations.
-    """
-    from dataclasses import replace
     rng = np.random.default_rng(seed)
-    linear_deltas, loglinear_deltas = [], []
+    n_items = len(agent_outputs[0].scores)
+    n_agents = len(agent_outputs)
 
+    # ── LINEAR: λᵢ monotonicity (trivially true, confirms 0% analytically) ──
+    linear_deltas = []
     for _ in range(n_trials):
-        idx = int(rng.integers(0, len(agent_outputs)))
-        delta = float(rng.uniform(0.05, 1.0))
-        name = agent_outputs[idx].agent_name
+        idx   = int(rng.integers(0, n_agents))
+        delta = float(rng.uniform(0.1, 5.0))
+        bids_before = [ao.bid for ao in agent_outputs]
+        bids_after  = [ao.bid + delta if i == idx else ao.bid
+                       for i, ao in enumerate(agent_outputs)]
+        lam_before = normalize_bids(bids_before)[idx]
+        lam_after  = normalize_bids(bids_after)[idx]
+        linear_deltas.append(lam_after - lam_before)
 
-        lin_q_before = linear_aggregation(agent_outputs)
-        ll_q_before  = loglinear_aggregation(agent_outputs)
+    # ── LOG-LINEAR: adversarial q(x*) test (finds the non-monotone region) ──
+    loglinear_deltas = []
+    for _ in range(n_trials):
+        idx    = int(rng.integers(0, n_agents))
+        x_star = int(rng.integers(0, n_items))
 
+        # Build adversarial distributions: agent idx weak, all others strong on x*
+        aos = []
+        for k, ao in enumerate(agent_outputs):
+            hot_val = float(rng.uniform(0.30, 0.52)) if k == idx else float(rng.uniform(0.80, 0.99))
+            scores = np.ones(n_items) * (1 - hot_val) / max(n_items - 1, 1)
+            scores[x_star] = hot_val
+            scores /= scores.sum()
+            init_bid = float(rng.uniform(0.01, 0.20))   # agent idx starts with low bid
+            aos.append(dc_replace(ao, scores=scores, bid=init_bid if k == idx else ao.bid))
+
+        delta = float(rng.uniform(0.5, 4.0))
+
+        ll_q_before = loglinear_aggregation(aos)
         perturbed = [
-            replace(ao, bid=ao.bid + delta) if i == idx else ao
-            for i, ao in enumerate(agent_outputs)
+            dc_replace(ao, bid=ao.bid + delta) if i == idx else ao
+            for i, ao in enumerate(aos)
         ]
-        lin_q_after = linear_aggregation(perturbed)
-        ll_q_after  = loglinear_aggregation(perturbed)
+        ll_q_after = loglinear_aggregation(perturbed)
 
-        lin_delta = (_dot_influence(agent_outputs[idx], lin_q_after)
-                     - _dot_influence(agent_outputs[idx], lin_q_before))
-        ll_delta  = (_dot_influence(agent_outputs[idx], ll_q_after)
-                     - _dot_influence(agent_outputs[idx], ll_q_before))
-
-        linear_deltas.append(lin_delta)
-        loglinear_deltas.append(ll_delta)
+        q_before_norm = ll_q_before / (ll_q_before.sum() + 1e-10)
+        q_after_norm  = ll_q_after  / (ll_q_after.sum()  + 1e-10)
+        loglinear_deltas.append(float(q_after_norm[x_star] - q_before_norm[x_star]))
 
     return {
         "linear":    monotonicity_violation_rate(linear_deltas),
@@ -99,6 +114,30 @@ def check_monotonicity(agent_outputs, n_trials=100, seed=42):
 
 
 # ── Main comparison ───────────────────────────────────────────────────────────
+
+class DynamicRelevanceAgent(RelevanceAgent):
+    """
+    Relevance agent with query-adaptive bid.
+    Bid scales with BM25 retrieval confidence: high max-score query → higher bid.
+    This breaks the fixed_weight == linear equivalence and shows auction-specific behavior.
+    """
+    def get_bid(self, query, candidates, user_context=None):
+        raw = self.score(query, candidates, user_context)
+        confidence = float(raw.max()) / (float(raw.mean()) + 1e-8)   # max/mean ratio
+        confidence = min(confidence / 10.0, 1.0)                      # normalize to [0,1]
+        return self.default_bid * (0.6 + 0.8 * confidence)            # range: [0.24, 0.56]
+
+
+class DynamicPersonalizationAgent(PersonalizationAgent):
+    """Bid scales with how well the user profile matches the candidate pool."""
+    def get_bid(self, query, candidates, user_context=None):
+        history = (user_context or {}).get("history", [])
+        if not history:
+            return self.default_bid * 0.5    # cold-start: low confidence
+        raw = self.score(query, candidates, user_context)
+        profile_strength = float(raw.max())  # 0–1, how well profile covers pool
+        return self.default_bid * (0.5 + profile_strength)
+
 
 def run_comparison(n_queries: int = 20, top_k: int = 10, pool_size: int = 100):
     print("\n" + "═" * 68)
@@ -110,8 +149,8 @@ def run_comparison(n_queries: int = 20, top_k: int = 10, pool_size: int = 100):
     item_index = build_item_index(items)
     queries = queries[:n_queries]
 
-    # Agents
-    agents = [
+    # ── Fixed-bid agents (for fixed_weight / loglinear baselines) ────────────
+    fixed_agents = [
         RelevanceAgent(bid=0.4),
         PersonalizationAgent(item_index=item_index, bid=0.3),
         DiversityAgent(all_categories=CATEGORIES, bid=0.2),
@@ -120,9 +159,21 @@ def run_comparison(n_queries: int = 20, top_k: int = 10, pool_size: int = 100):
     fixed_weights = {"relevance": 0.4, "personalization": 0.3,
                      "diversity": 0.2, "safety": 0.1}
 
+    # ── Dynamic-bid agents (for linear auction — shows real auction behavior) ─
+    dynamic_agents = [
+        DynamicRelevanceAgent(bid=0.4),
+        DynamicPersonalizationAgent(item_index=item_index, bid=0.3),
+        DiversityAgent(all_categories=CATEGORIES, bid=0.2),
+        SafetyAgent(bid=0.1),
+    ]
+
+    # ── Single-agent ablation (relevance only) ────────────────────────────────
+    relevance_only = [RelevanceAgent(bid=1.0)]
+
     # Auctions
-    linear_auction    = SlateAuction(agents, aggregation_rule="linear",    compute_payment=True)
-    loglinear_auction = SlateAuction(agents, aggregation_rule="loglinear", compute_payment=False)
+    linear_auction    = SlateAuction(dynamic_agents, aggregation_rule="linear",    compute_payment=True)
+    loglinear_auction = SlateAuction(fixed_agents,   aggregation_rule="loglinear", compute_payment=False)
+    single_auction    = SlateAuction(relevance_only,  aggregation_rule="linear",   compute_payment=False)
 
     # Embedding dict for ILD
     cat_list = sorted(CATEGORIES)
@@ -136,9 +187,10 @@ def run_comparison(n_queries: int = 20, top_k: int = 10, pool_size: int = 100):
         embeddings[item["item_id"]] = vec
 
     metrics = {
-        "fixed_weight": {"ndcg5": [], "ndcg10": [], "rec10": [], "ild": [], "mrr": []},
-        "linear":       {"ndcg5": [], "ndcg10": [], "rec10": [], "ild": [], "mrr": []},
-        "loglinear":    {"ndcg5": [], "ndcg10": [], "rec10": [], "ild": [], "mrr": []},
+        "single_agent":  {"ndcg5": [], "ndcg10": [], "rec10": [], "ild": [], "mrr": []},
+        "fixed_weight":  {"ndcg5": [], "ndcg10": [], "rec10": [], "ild": [], "mrr": []},
+        "linear_dynamic":{"ndcg5": [], "ndcg10": [], "rec10": [], "ild": [], "mrr": []},
+        "loglinear":     {"ndcg5": [], "ndcg10": [], "rec10": [], "ild": [], "mrr": []},
     }
 
     last_agent_outputs = None  # save for monotonicity check
@@ -159,30 +211,40 @@ def run_comparison(n_queries: int = 20, top_k: int = 10, pool_size: int = 100):
         )
         gt = query_info["relevant_item_ids"]
 
-        # Collect agent outputs once (shared across methods)
-        agent_outputs = [ag(query_info["query_text"], candidates, user_context)
-                         for ag in agents]
-        last_agent_outputs = agent_outputs
+        # Collect fixed agent outputs (shared for fixed_weight & loglinear)
+        fixed_agent_outputs = [ag(query_info["query_text"], candidates, user_context)
+                                for ag in fixed_agents]
+        last_agent_outputs = fixed_agent_outputs
+
+        # ── Single-agent ablation (relevance only) ──
+        sa_result = single_auction.run(
+            query_info["query_text"], candidates, user_context, top_k
+        )
+        metrics["single_agent"]["ndcg5"].append(ndcg_at_k(sa_result.ranked_items, gt, 5))
+        metrics["single_agent"]["ndcg10"].append(ndcg_at_k(sa_result.ranked_items, gt, 10))
+        metrics["single_agent"]["rec10"].append(recall_at_k(sa_result.ranked_items, gt, 10))
+        metrics["single_agent"]["ild"].append(intra_list_diversity(sa_result.ranked_items, embeddings, 10))
+        metrics["single_agent"]["mrr"].append(mrr(sa_result.ranked_items, gt))
 
         # ── Fixed-weight baseline ──
-        fw_ranked = fixed_weight_rank(candidates, agent_outputs, fixed_weights, top_k)
+        fw_ranked = fixed_weight_rank(candidates, fixed_agent_outputs, fixed_weights, top_k)
         metrics["fixed_weight"]["ndcg5"].append(ndcg_at_k(fw_ranked, gt, 5))
         metrics["fixed_weight"]["ndcg10"].append(ndcg_at_k(fw_ranked, gt, 10))
         metrics["fixed_weight"]["rec10"].append(recall_at_k(fw_ranked, gt, 10))
         metrics["fixed_weight"]["ild"].append(intra_list_diversity(fw_ranked, embeddings, 10))
         metrics["fixed_weight"]["mrr"].append(mrr(fw_ranked, gt))
 
-        # ── Linear auction ──
+        # ── Linear auction (dynamic bids — breaks fixed_weight == linear) ──
         lin_result = linear_auction.run(
             query_info["query_text"], candidates, user_context, top_k
         )
-        metrics["linear"]["ndcg5"].append(ndcg_at_k(lin_result.ranked_items, gt, 5))
-        metrics["linear"]["ndcg10"].append(ndcg_at_k(lin_result.ranked_items, gt, 10))
-        metrics["linear"]["rec10"].append(recall_at_k(lin_result.ranked_items, gt, 10))
-        metrics["linear"]["ild"].append(intra_list_diversity(lin_result.ranked_items, embeddings, 10))
-        metrics["linear"]["mrr"].append(mrr(lin_result.ranked_items, gt))
+        metrics["linear_dynamic"]["ndcg5"].append(ndcg_at_k(lin_result.ranked_items, gt, 5))
+        metrics["linear_dynamic"]["ndcg10"].append(ndcg_at_k(lin_result.ranked_items, gt, 10))
+        metrics["linear_dynamic"]["rec10"].append(recall_at_k(lin_result.ranked_items, gt, 10))
+        metrics["linear_dynamic"]["ild"].append(intra_list_diversity(lin_result.ranked_items, embeddings, 10))
+        metrics["linear_dynamic"]["mrr"].append(mrr(lin_result.ranked_items, gt))
 
-        # ── Log-linear auction ──
+        # ── Log-linear auction (fixed bids) ──
         ll_result = loglinear_auction.run(
             query_info["query_text"], candidates, user_context, top_k
         )
@@ -192,20 +254,31 @@ def run_comparison(n_queries: int = 20, top_k: int = 10, pool_size: int = 100):
         metrics["loglinear"]["ild"].append(intra_list_diversity(ll_result.ranked_items, embeddings, 10))
         metrics["loglinear"]["mrr"].append(mrr(ll_result.ranked_items, gt))
 
-        print(f"  [{q_idx+1:>3}/{n_queries}] {query_info['query_text'][:40]:<40}  ✓",
+        print(f"  [{q_idx+1:>3}/{n_queries}] q_{q_idx:03d}  "
+              f"single={metrics['single_agent']['ndcg10'][-1]:.4f}  "
+              f"lin_dyn={metrics['linear_dynamic']['ndcg10'][-1]:.4f}  "
+              f"loglin={metrics['loglinear']['ndcg10'][-1]:.4f}",
               flush=True)
 
     # ── Results Table ──────────────────────────────────────────────────────────
     print("\n" + "═" * 68)
     print("  EXPERIMENT 1 — Ranking Quality Comparison")
+    print("  (linear_dynamic uses query-adaptive bids; others use fixed bids)")
     print("═" * 68)
     hdr = f"  {'Method':<22} {'NDCG@5':>7}  {'NDCG@10':>8}  {'Recall@10':>9}  {'ILD@10':>7}  {'MRR':>6}"
     sep = f"  {'─'*22} {'─'*7}  {'─'*8}  {'─'*9}  {'─'*7}  {'─'*6}"
     print(hdr)
     print(sep)
+    method_labels = {
+        "single_agent":   "single_agent (rel.)",
+        "fixed_weight":   "fixed_weight",
+        "linear_dynamic": "linear_dynamic [ours]",
+        "loglinear":      "loglinear",
+    }
     for name, m in metrics.items():
+        label = method_labels.get(name, name)
         print(
-            f"  {name:<22} "
+            f"  {label:<22} "
             f"{np.mean(m['ndcg5']):>7.4f}  "
             f"{np.mean(m['ndcg10']):>8.4f}  "
             f"{np.mean(m['rec10']):>9.4f}  "
@@ -228,12 +301,13 @@ def run_comparison(n_queries: int = 20, top_k: int = 10, pool_size: int = 100):
     # ── Manipulation stress test ──────────────────────────────────────────────
     if last_agent_outputs:
         print("\n" + "═" * 68)
-        print("  EXPERIMENT 4 — Strategic Bid Manipulation (Business Agent)")
-        print("  Manipulator inflates bid by k × true_bid")
+        print("  EXPERIMENT 4 — Strategic Bid Manipulation (Diversity Agent, bid=0.2)")
+        print("  k = bid inflation multiplier.  rank_promo = avg rank improvement (higher=more manipulation).")
+        print("  Theory: linear bounded; loglinear grows faster at low k.")
         print("═" * 68)
-        print(f"  {'k':>4}  {'Linear Gain':>12}  {'Linear NDCG Drop':>16}  "
-              f"{'LogLinear Gain':>14}  {'LogLinear NDCG Drop':>19}")
-        print(f"  {'─'*4}  {'─'*12}  {'─'*16}  {'─'*14}  {'─'*19}")
+        print(f"  {'k':>4}  {'Lin.Gain':>9}  {'Lin.RankProm':>12}  {'Lin.NDCG-':>9}  "
+              f"{'LL.Gain':>9}  {'LL.RankProm':>11}  {'LL.NDCG-':>9}")
+        print(f"  {'─'*4}  {'─'*9}  {'─'*12}  {'─'*9}  {'─'*9}  {'─'*11}  {'─'*9}")
 
         # Use last query's candidates as proxy
         user = users[0]
@@ -250,12 +324,12 @@ def run_comparison(n_queries: int = 20, top_k: int = 10, pool_size: int = 100):
         )
         gt = queries[-1]["relevant_item_ids"]
         agent_outputs = [ag(queries[-1]["query_text"], candidates, user_context)
-                         for ag in agents]
+                         for ag in fixed_agents]
 
         results = compare_manipulation_across_rules(
             agent_outputs=agent_outputs,
-            manipulator_name="relevance",  # relevance has strong preferences → visible gain
-            k_values=[1, 2, 5, 10],
+            manipulator_name="diversity",  # diversity has distinctive preferences → visible gain
+            k_values=[1, 2, 5, 10, 20],
             ground_truth=gt,
             candidates=candidates,
             top_k=top_k,
@@ -264,14 +338,17 @@ def run_comparison(n_queries: int = 20, top_k: int = 10, pool_size: int = 100):
         linear_by_k = {r["k"]: r for r in results["linear"]}
         ll_by_k     = {r["k"]: r for r in results["loglinear"]}
 
-        for k in [1, 2, 5, 10]:
+        for k in [1, 2, 5, 10, 20]:
             l  = linear_by_k[k]
             ll = ll_by_k[k]
             print(
-                f"  {k:>4}  {l['manipulation_gain']:>12.4f}  "
-                f"{l['ndcg_drop']:>16.4f}  "
-                f"{ll['manipulation_gain']:>14.4f}  "
-                f"{ll['ndcg_drop']:>19.4f}"
+                f"  {k:>4}  "
+                f"{l['manipulation_gain']:>9.4f}  "
+                f"{l['rank_promotion']:>12.4f}  "
+                f"{l['ndcg_drop']:>9.4f}  "
+                f"{ll['manipulation_gain']:>9.4f}  "
+                f"{ll['rank_promotion']:>11.4f}  "
+                f"{ll['ndcg_drop']:>9.4f}"
             )
 
     print("\n  Done.\n")

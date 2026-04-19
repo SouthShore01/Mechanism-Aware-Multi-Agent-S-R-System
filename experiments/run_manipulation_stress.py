@@ -10,6 +10,10 @@ Usage:
     python experiments/run_manipulation_stress.py
 """
 
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+sys.stdout.reconfigure(encoding="utf-8")
+
 import numpy as np
 from src.agents.base_agent import AgentOutput
 from src.evaluation.manipulation_test import compare_manipulation_across_rules

@@ -33,18 +33,43 @@ def _topk_influence(agent_output: AgentOutput, aggregated: np.ndarray, top_k: in
     """
     Influence = fraction of the agent's own top-K items that appear in the
     final aggregated top-K slate.
-
-    This is the correct measure for the manipulation test:
-    - Under linear aggregation (monotone/IC): a strategic agent inflating its
-      bid sees bounded gain in getting its preferred items into the slate.
-    - Under log-linear aggregation (non-monotone): gain is unbounded because
-      the multiplicative rule allows a dominant agent to crowd out others.
     """
     n = len(aggregated)
     effective_k = min(top_k, n)
     agent_top = set(np.argsort(agent_output.scores)[::-1][:effective_k])
     final_top = set(np.argsort(aggregated)[::-1][:effective_k])
     return len(agent_top & final_top) / effective_k
+
+
+def _rank_promotion(agent_output: AgentOutput,
+                    agg_baseline: np.ndarray,
+                    agg_inflated: np.ndarray) -> float:
+    """
+    Rank promotion metric: average improvement in ranking position for the
+    manipulator's top-5 preferred items.
+
+    rank_promotion > 0 means the manipulator succeeded in moving its content UP.
+    This is bounded under linear aggregation (second-price property limits gain)
+    and grows faster under log-linear (non-monotone, allows crowding out).
+
+    Normalized by candidate pool size so results are comparable across queries.
+    """
+    n = len(agg_baseline)
+    effective_k = min(5, n)
+    agent_top5 = np.argsort(agent_output.scores)[::-1][:effective_k]
+
+    # Rank in sorted order (1 = best); lower rank = better
+    rank_baseline = {idx: int(r) + 1 for r, idx in enumerate(np.argsort(agg_baseline)[::-1])}
+    rank_inflated = {idx: int(r) + 1 for r, idx in enumerate(np.argsort(agg_inflated)[::-1])}
+
+    promotions = []
+    for idx in agent_top5:
+        rank_b = rank_baseline.get(int(idx), n)
+        rank_i = rank_inflated.get(int(idx), n)
+        # Positive = moved UP in ranking (good for manipulator)
+        promotions.append((rank_b - rank_i) / n)   # normalize by pool size
+
+    return float(np.mean(promotions)) if promotions else 0.0
 
 
 def run_manipulation_sweep(
@@ -88,6 +113,7 @@ def run_manipulation_sweep(
         inflated_influence = _topk_influence(manipulator_ao, inflated_agg, top_k)
         ranked_inflated = [candidates[i] for i in np.argsort(inflated_agg)[::-1][:top_k]]
         inflated_ndcg = ndcg_at_k(ranked_inflated, ground_truth, top_k)
+        rank_promo = _rank_promotion(manipulator_ao, baseline_agg, inflated_agg)
 
         results.append({
             "k":                      k,
@@ -95,6 +121,7 @@ def run_manipulation_sweep(
             "baseline_influence":     baseline_influence,
             "inflated_influence":     inflated_influence,
             "manipulation_gain":      inflated_influence - baseline_influence,
+            "rank_promotion":         rank_promo,
             "ndcg_at_k":              inflated_ndcg,
             "ndcg_drop":              baseline_ndcg - inflated_ndcg,
         })

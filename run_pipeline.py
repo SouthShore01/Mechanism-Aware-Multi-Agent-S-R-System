@@ -11,6 +11,9 @@ Usage:
     python run_pipeline.py --n_queries 5 --top_k 5
 """
 
+import sys
+sys.stdout.reconfigure(encoding="utf-8")
+
 import argparse
 import numpy as np
 from typing import List, Dict
