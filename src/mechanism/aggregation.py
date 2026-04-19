@@ -22,6 +22,9 @@ from src.agents.base_agent import AgentOutput
 
 def normalize_bids(bids: List[float]) -> np.ndarray:
     """Compute lambda_i = b_i / sum_j b_j."""
+    if len(bids) == 0:
+        return np.array([], dtype=float)
+
     bids_arr = np.array(bids, dtype=float)
     total = bids_arr.sum()
     if total <= 0:
@@ -47,6 +50,9 @@ def linear_aggregation(agent_outputs: List[AgentOutput]) -> np.ndarray:
     Returns:
         np.ndarray: aggregated distribution over candidates, shape (num_candidates,)
     """
+    if len(agent_outputs) == 0:
+        raise ValueError("linear_aggregation requires at least one agent output")
+
     bids = [ao.bid for ao in agent_outputs]
     lambdas = normalize_bids(bids)
 
@@ -56,7 +62,11 @@ def linear_aggregation(agent_outputs: List[AgentOutput]) -> np.ndarray:
 
     # Renormalize for numerical safety
     aggregated = np.clip(aggregated, 0, None)
-    aggregated /= aggregated.sum()
+    total = aggregated.sum()
+    if total <= 0:
+        aggregated = np.ones_like(aggregated) / len(aggregated)
+    else:
+        aggregated /= total
     return aggregated
 
 
@@ -78,6 +88,9 @@ def loglinear_aggregation(agent_outputs: List[AgentOutput], epsilon: float = 1e-
     Returns:
         np.ndarray: aggregated distribution, shape (num_candidates,)
     """
+    if len(agent_outputs) == 0:
+        raise ValueError("loglinear_aggregation requires at least one agent output")
+
     bids = [ao.bid for ao in agent_outputs]
     lambdas = normalize_bids(bids)
 
